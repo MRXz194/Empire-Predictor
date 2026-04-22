@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Empire Predictor — Dashboard</title>
+    <meta name="description" content="CSGOEmpire Roulette Prediction Dashboard with AI-powered models">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- ── Header ──────────────────────────────────────────────── -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <span class="logo-icon">◆</span>
+                <span class="logo-text">EMPIRE PREDICTOR</span>
+            </div>
+            <span class="version">v2.0 KỊCH KIM</span>
+        </div>
+        <div class="header-center">
+            <div class="status-badge" id="connection-status">
+                <span class="status-dot"></span>
+                <span>Connecting...</span>
+            </div>
+            <div class="stat-pill">
+                <span class="stat-label">Total Rounds</span>
+                <span class="stat-value" id="total-rounds">—</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="bankroll-box">
+                <span class="bankroll-label">BANKROLL</span>
+                <input type="number" id="bankroll-input" value="100" min="1" step="1">
+            </div>
+        </div>
+    </header>
+
+    <!-- ── Main Grid ───────────────────────────────────────────── -->
+    <main class="dashboard-grid">
+
+        <!-- ═══ Panel 1: REALTIME ═══ -->
+        <section class="panel panel-realtime" id="panel-realtime">
+            <div class="panel-header">
+                <h2>⚡ Realtime</h2>
+                <span class="panel-badge" id="round-id">—</span>
+            </div>
+
+            <!-- Big Recommendation -->
+            <div class="prediction-hero" id="prediction-hero">
+                <div class="pred-color-badge" id="pred-badge">—</div>
+                <div class="pred-info">
+                    <div class="pred-action" id="pred-action">Waiting...</div>
+                    <div class="pred-confidence-bar">
+                        <div class="confidence-fill" id="confidence-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="pred-confidence-text" id="pred-confidence">0%</div>
+                </div>
+                <div class="pred-bet" id="pred-bet">
+                    <span class="bet-label">BET</span>
+                    <span class="bet-amount" id="bet-amount">—</span>
+                </div>
+            </div>
+
+            <!-- Model Votes -->
+            <div class="model-votes" id="model-votes">
+                <div class="vote-item" id="vote-mamba">
+                    <span class="vote-name">Mamba Model</span>
+                    <span class="vote-badge">—</span>
+                    <span class="vote-weight">—</span>
+                </div>
+                <div class="vote-item" id="vote-tft">
+                    <span class="vote-name">TFT Model</span>
+                    <span class="vote-badge">—</span>
+                    <span class="vote-weight">—</span>
+                </div>
+                <div class="vote-item" id="vote-foundation">
+                    <span class="vote-name">Foundation</span>
+                    <span class="vote-badge">—</span>
+                    <span class="vote-weight">—</span>
+                </div>
+                <div class="vote-item" id="vote-lstm">
+                    <span class="vote-name">LSTM</span>
+                    <span class="vote-badge">—</span>
+                    <span class="vote-weight">—</span>
+                </div>
+                <div class="vote-item" id="vote-markov">
+                    <span class="vote-name">Markov</span>
+                    <span class="vote-badge">—</span>
+                    <span class="vote-weight">—</span>
+                </div>
+                <div class="vote-item" id="vote-statistical">
+                    <span class="vote-name">Statistical</span>
+                    <span class="vote-badge">—</span>
+                    <span class="vote-weight">—</span>
+                </div>
+                <div class="vote-item" id="vote-rl_agent">
+                    <span class="vote-name">RL Agent</span>
+                    <span class="vote-badge">—</span>
+                    <span class="vote-weight">—</span>
+                </div>
+            </div>
+
+            <!-- Probability Bars -->
+            <div class="prob-bars">
+                <div class="prob-row">
+                    <span class="prob-label color-t">T</span>
+                    <div class="prob-bar-track">
+                        <div class="prob-bar-fill bar-t" id="prob-t" style="width:47%"></div>
+                    </div>
+                    <span class="prob-pct" id="prob-t-pct">47%</span>
+                </div>
+                <div class="prob-row">
+                    <span class="prob-label color-ct">CT</span>
+                    <div class="prob-bar-track">
+                        <div class="prob-bar-fill bar-ct" id="prob-ct" style="width:47%"></div>
+                    </div>
+                    <span class="prob-pct" id="prob-ct-pct">47%</span>
+                </div>
+                <div class="prob-row">
+                    <span class="prob-label color-bonus">B</span>
+                    <div class="prob-bar-track">
+                        <div class="prob-bar-fill bar-bonus" id="prob-bonus" style="width:6%"></div>
+                    </div>
+                    <span class="prob-pct" id="prob-bonus-pct">6%</span>
+                </div>
+            </div>
+
+            <!-- Recent Rolls Feed -->
+            <div class="recent-feed">
+                <h3>Recent Outcomes</h3>
+                <div class="roll-dots" id="roll-dots"></div>
+            </div>
+        </section>
+
+        <!-- ═══ Panel 2: SESSION ═══ -->
+        <section class="panel panel-session" id="panel-session">
+            <div class="panel-header">
+                <h2>🛡️ Session</h2>
+                <span class="panel-badge" id="health-label">—</span>
+            </div>
+
+            <!-- Health Gauge -->
+            <div class="health-gauge-container">
+                <svg class="health-gauge" viewBox="0 0 200 120">
+                    <path class="gauge-bg" d="M 20 100 A 80 80 0 0 1 180 100" />
+                    <path class="gauge-fill" id="gauge-fill" d="M 20 100 A 80 80 0 0 1 180 100" />
+                    <text class="gauge-text" id="gauge-text" x="100" y="95">—</text>
+                    <text class="gauge-sublabel" x="100" y="112">HEALTH SCORE</text>
+                </svg>
+            </div>
+
+            <!-- Session Stats -->
+            <div class="session-stats">
+                <div class="session-stat">
+                    <span class="ss-label">Rounds</span>
+                    <span class="ss-value" id="session-rounds">0</span>
+                </div>
+                <div class="session-stat">
+                    <span class="ss-label">Win Rate</span>
+                    <span class="ss-value" id="session-winrate">—</span>
+                </div>
+                <div class="session-stat">
+                    <span class="ss-label">Streak</span>
+                    <span class="ss-value" id="session-streak">—</span>
+                </div>
+            </div>
+
+
+            <!-- Variance Info -->
+            <div class="variance-box">
+                <h3>Variance Monitor</h3>
+                <div class="var-row">
+                    <span>Z-Score</span>
+                    <span id="var-zscore" class="var-value">0</span>
+                </div>
+                <div class="var-row">
+                    <span>T/CT Ratio</span>
+                    <span id="var-ratio" class="var-value">50%</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ Panel 3: ANALYTICS ═══ -->
+        <section class="panel panel-analytics" id="panel-analytics">
+            <div class="panel-header">
+                <h2>📊 Analytics</h2>
+            </div>
+
+            <!-- Color Distribution -->
+            <div class="chart-section">
+                <h3>Color Distribution</h3>
+                <div class="dist-bars" id="dist-bars">
+                    <div class="dist-bar-group">
+                        <div class="dist-bar bar-t-bg">
+                            <div class="dist-fill" id="dist-t"></div>
+                        </div>
+                        <span class="dist-label">T</span>
+                        <span class="dist-count" id="dist-t-count">—</span>
+                    </div>
+                    <div class="dist-bar-group">
+                        <div class="dist-bar bar-ct-bg">
+                            <div class="dist-fill" id="dist-ct"></div>
+                        </div>
+                        <span class="dist-label">CT</span>
+                        <span class="dist-count" id="dist-ct-count">—</span>
+                    </div>
+                    <div class="dist-bar-group">
+                        <div class="dist-bar bar-bonus-bg">
+                            <div class="dist-fill" id="dist-bonus"></div>
+                        </div>
+                        <span class="dist-label">Bonus</span>
+                        <span class="dist-count" id="dist-bonus-count">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Model Weights -->
+            <div class="chart-section">
+                <h3>Model Weights</h3>
+                <div class="weight-bars" id="weight-bars">
+                    <div class="weight-row"><span>Mamba</span>
+                        <div class="weight-track">
+                            <div class="weight-fill" id="w-mamba"></div>
+                        </div><span id="w-mamba-pct">14%</span>
+                    </div>
+                    <div class="weight-row"><span>TFT Attention</span>
+                        <div class="weight-track">
+                            <div class="weight-fill" id="w-tft"></div>
+                        </div><span id="w-tft-pct">14%</span>
+                    </div>
+                    <div class="weight-row"><span>Foundation</span>
+                        <div class="weight-track">
+                            <div class="weight-fill" id="w-foundation"></div>
+                        </div><span id="w-foundation-pct">14%</span>
+                    </div>
+                    <div class="weight-row"><span>LSTM</span>
+                        <div class="weight-track">
+                            <div class="weight-fill" id="w-lstm"></div>
+                        </div><span id="w-lstm-pct">14%</span>
+                    </div>
+                    <div class="weight-row"><span>Markov</span>
+                        <div class="weight-track">
+                            <div class="weight-fill" id="w-markov"></div>
+                        </div><span id="w-markov-pct">14%</span>
+                    </div>
+                    <div class="weight-row"><span>Statistical</span>
+                        <div class="weight-track">
+                            <div class="weight-fill" id="w-statistical"></div>
+                        </div><span id="w-statistical-pct">14%</span>
+                    </div>
+                    <div class="weight-row"><span>RL Agent</span>
+                        <div class="weight-track">
+                            <div class="weight-fill" id="w-rl_agent"></div>
+                        </div><span id="w-rl_agent-pct">14%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prediction Accuracy -->
+            <div class="chart-section">
+                <h3>Prediction Accuracy</h3>
+                <div class="accuracy-box" id="accuracy-box">
+                    <div class="acc-big" id="acc-pct">—</div>
+                    <div class="acc-detail" id="acc-detail">—</div>
+                </div>
+            </div>
+
+            <!-- Streak Stats -->
+            <div class="chart-section">
+                <h3>Streak Analysis</h3>
+                <div class="streak-grid" id="streak-grid">
+                    <div class="streak-item">
+                        <span class="si-label color-t">T Max Streak</span>
+                        <span class="si-value" id="streak-t-max">—</span>
+                    </div>
+                    <div class="streak-item">
+                        <span class="si-label color-ct">CT Max Streak</span>
+                        <span class="si-value" id="streak-ct-max">—</span>
+                    </div>
+                    <div class="streak-item">
+                        <span class="si-label color-bonus">Bonus Max Streak</span>
+                        <span class="si-value" id="streak-bonus-max">—</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ Panel 4: BACKTESTING ═══ -->
+        <section class="panel panel-backtest" id="panel-backtest">
+            <div class="panel-header">
+                <h2>🧪 Backtesting</h2>
+            </div>
+
+            <!-- Backtest Controls -->
+            <div class="bt-controls">
+                <div class="bt-row">
+                    <label>Strategy</label>
+                    <select id="bt-strategy">
+                        <option value="ensemble">Ensemble (all models)</option>
+                        <option value="mamba">Mamba (Long Context)</option>
+                        <option value="tft">TFT (True Temporal)</option>
+                        <option value="foundation">Foundation (NHITS)</option>
+                        <option value="statistical">Statistical</option>
+                        <option value="rl">RL Agent</option>
+                    </select>
+                </div>
+                <div class="bt-row">
+                    <label>Bankroll</label>
+                    <input type="number" id="bt-bankroll" value="100" min="1">
+                </div>
+                <div class="bt-row">
+                    <label>Confidence</label>
+                    <input type="number" id="bt-confidence" value="0.55" min="0.5" max="0.9" step="0.05">
+                </div>
+                <button class="btn-primary" id="btn-backtest" onclick="runBacktest()">
+                    Run Backtest
+                </button>
+                <button class="btn-secondary" id="btn-montecarlo" onclick="runMonteCarlo()">
+                    Monte Carlo (10K)
+                </button>
+            </div>
+
+            <!-- Backtest Results -->
+            <div class="bt-results" id="bt-results" style="display:none">
+                <h3>Results</h3>
+                <div class="bt-kpi-grid">
+                    <div class="bt-kpi"><span class="kpi-label">ROI</span><span class="kpi-value" id="bt-roi">—</span>
+                    </div>
+                    <div class="bt-kpi"><span class="kpi-label">Win Rate</span><span class="kpi-value"
+                            id="bt-winrate">—</span></div>
+                    <div class="bt-kpi"><span class="kpi-label">Max Drawdown</span><span class="kpi-value"
+                            id="bt-drawdown">—</span></div>
+                    <div class="bt-kpi"><span class="kpi-label">Sharpe</span><span class="kpi-value"
+                            id="bt-sharpe">—</span></div>
+                    <div class="bt-kpi"><span class="kpi-label">Final Bankroll</span><span class="kpi-value"
+                            id="bt-final">—</span></div>
+                    <div class="bt-kpi"><span class="kpi-label">Total Bets</span><span class="kpi-value"
+                            id="bt-bets">—</span></div>
+                </div>
+
+                <!-- Simple ASCII Bankroll Chart -->
+                <div class="bt-chart-container">
+                    <h3>Bankroll Curve</h3>
+                    <canvas id="bt-chart" width="500" height="200"></canvas>
+                </div>
+            </div>
+
+            <!-- Monte Carlo Results -->
+            <div class="mc-results" id="mc-results" style="display:none">
+                <h3>Monte Carlo Simulation</h3>
+                <div class="bt-kpi-grid">
+                    <div class="bt-kpi"><span class="kpi-label">Mean</span><span class="kpi-value" id="mc-mean">—</span>
+                    </div>
+                    <div class="bt-kpi"><span class="kpi-label">Median</span><span class="kpi-value"
+                            id="mc-median">—</span></div>
+                    <div class="bt-kpi"><span class="kpi-label">P10</span><span class="kpi-value" id="mc-p10">—</span>
+                    </div>
+                    <div class="bt-kpi"><span class="kpi-label">P90</span><span class="kpi-value" id="mc-p90">—</span>
+                    </div>
+                    <div class="bt-kpi"><span class="kpi-label">Ruin Prob</span><span class="kpi-value"
+                            id="mc-ruin">—</span></div>
+                    <div class="bt-kpi"><span class="kpi-label">Profit Prob</span><span class="kpi-value"
+                            id="mc-profit">—</span></div>
+                </div>
+                <div class="bt-chart-container">
+                    <h3>Distribution</h3>
+                    <canvas id="mc-chart" width="500" height="200"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <span>Empire Predictor v2.0 — KỊCH KIM Ensemble AI (TFT + MAMBA + LSTM + MARKOV + STAT + FOUNDATION + RL)</span>
+    </footer>
+
+    <script src="dashboard.js"></script>
+</body>
+
+</html>

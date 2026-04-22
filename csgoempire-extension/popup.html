@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 360px;
+    min-height: 400px;
+    font-family: -apple-system, sans-serif;
+    font-size: 13px;
+    background: #0f1923;
+    color: #e2e8f0;
+  }
+  .header {
+    background: #1a2535;
+    padding: 12px 16px;
+    border-bottom: 1px solid #2d3748;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header h1 { font-size: 14px; font-weight: 600; color: #63b3ed; }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #68d391;
+  }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #68d391;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: #2d3748;
+    border-bottom: 1px solid #2d3748;
+  }
+  .stat {
+    background: #1a2535;
+    padding: 10px;
+    text-align: center;
+  }
+  .stat-value { font-size: 20px; font-weight: 700; color: #63b3ed; }
+  .stat-label { font-size: 10px; color: #718096; margin-top: 2px; }
+  .section-title {
+    padding: 8px 16px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #718096;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .roll-list {
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+  }
+  .roll-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    margin-bottom: 2px;
+    background: #1a2535;
+  }
+  .roll-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+    flex-shrink: 0;
+  }
+  .roll-ct { background: #2b4c7e; color: #63b3ed; }
+  .roll-t  { background: #7b3f00; color: #f6ad55; }
+  .roll-zero { background: #276749; color: #68d391; }
+  .roll-info { flex: 1; }
+  .roll-event { font-size: 10px; color: #718096; }
+  .roll-time  { font-size: 10px; color: #4a5568; }
+  .raw-toggle {
+    font-size: 10px; color: #4299e1;
+    cursor: pointer; text-decoration: underline;
+  }
+  .raw-data {
+    display: none;
+    font-size: 10px; color: #718096;
+    font-family: monospace;
+    background: #0f1923;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+    word-break: break-all;
+    white-space: pre-wrap;
+  }
+  .actions {
+    padding: 8px 16px;
+    display: flex;
+    gap: 8px;
+    border-top: 1px solid #2d3748;
+  }
+  button {
+    flex: 1;
+    padding: 7px;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .btn-export { background: #2b6cb0; color: white; }
+  .btn-clear  { background: #742a2a; color: white; }
+  .btn-export:hover { background: #2c5282; }
+  .btn-clear:hover  { background: #63171b; }
+  .empty {
+    text-align: center;
+    padding: 32px 16px;
+    color: #4a5568;
+  }
+  .empty p { margin-top: 8px; font-size: 12px; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #0f1923; }
+  ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>CSGOEmpire Tracker</h1>
+  <div class="status">
+    <div class="dot"></div>
+    <span id="status-text">Monitoring</span>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat">
+    <div class="stat-value" id="total-count">0</div>
+    <div class="stat-label">Total rolls</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value" id="ct-count" style="color:#63b3ed">0</div>
+    <div class="stat-label">CT (blue)</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value" id="t-count" style="color:#f6ad55">0</div>
+    <div class="stat-label">T (orange)</div>
+  </div>
+</div>
+
+<div class="section-title">Recent rolls</div>
+<div class="roll-list" id="roll-list">
+  <div class="empty" id="empty-state">
+    <div style="font-size:24px">🎯</div>
+    <p>Mở CSGOEmpire roulette<br>để bắt đầu capture data</p>
+  </div>
+</div>
+
+<div class="actions">
+  <button class="btn-export" id="btn-export">Export JSON</button>
+  <button class="btn-clear" id="btn-clear">Clear data</button>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

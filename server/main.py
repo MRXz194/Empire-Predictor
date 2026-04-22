@@ -1,0 +1,421 @@
+"""
+main.py - FastAPI Server (Tầng 1 endpoint + kết nối tất cả 8 tầng)
+"""
+import os
+import sys
+import json
+import time
+import asyncio
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
+from typing import Optional
+
+# Add server dir to path
+SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SERVER_DIR)
+
+from database import init_db, insert_roll, get_recent_rolls, get_rolls_for_training, get_roll_count, insert_prediction, update_prediction_result
+from database import get_prediction_accuracy, get_prediction_by_round, get_daily_stats
+from models.tft_model import TFTModel
+from models.statistical import StatisticalModel
+from models.rl_agent import QLearningAgent
+from models.ensemble import DynamicEnsemble
+from models.markov import MarkovChain
+from models.foundation_model import FoundationModel
+from models.mamba_model import MambaPredictor
+from models.features import compute_features_array, prepare_sequences, outcome_to_color
+from engine.decision import make_decision
+from engine.session import HealthScore
+from reporting.stats import get_overall_stats, get_prediction_stats, get_streak_analysis
+from reporting.alerts import check_high_confidence_alert
+from backtest.engine import run_backtest
+from backtest.monte_carlo import run_monte_carlo
+
+# ── Global state ─────────────────────────────────────────────────────────────
+tft_predictor = TFTModel()
+stat_model = StatisticalModel()
+rl_agent = QLearningAgent(epsilon=0.05)
+markov_model = MarkovChain()
+foundation_model = FoundationModel()
+mamba_predictor = MambaPredictor()
+ensemble = DynamicEnsemble()
+health_scorer = HealthScore()
+lstm_predictor = None  # Lazy loaded
+online_learner = None  # Lazy loaded
+
+connected_clients: list[WebSocket] = []
+recent_colors_cache: list[str] = []  # in-memory cache of recent colors
+last_pred = None
+last_prediction_timestamp = 0
+
+# Bankroll tracking
+user_bankroll = 100.0
+user_kelly_mult = 0.5 # Default balanced
+
+
+# ── Models ───────────────────────────────────────────────────────────────────
+
+class BankrollUpdate(BaseModel):
+    bankroll: float
+    kelly_mult: Optional[float] = 0.5
+
+class RollInput(BaseModel):
+    round_id: int
+    outcome: int
+    color: Optional[str] = None
+    timestamp: Optional[int] = None
+
+class BacktestParams(BaseModel):
+    strategy: str = 'ensemble'
+    bankroll: float = 100.0
+    confidence_threshold: float = 0.55
+
+class MonteCarloParams(BaseModel):
+    n_simulations: int = 10000
+    n_rounds: int = 100
+    bankroll: float = 100.0
+    bet_fraction: float = 0.05
+
+# ── Lifespan ─────────────────────────────────────────────────────────────────
+is_retraining = False
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: init DB + load/train models."""
+    init_db()
+    
+    global recent_colors_cache
+    recent = get_recent_rolls(500)
+    recent_colors_cache = [r['color'] for r in reversed(recent)]
+    
+    import threading
+    threading.Thread(target=_load_or_train_models, daemon=True).start()
+    
+    yield
+
+    # Shutdown
+    tft_predictor.save()
+    rl_agent.save()
+    ensemble.save()
+    stat_model.save()
+    markov_model.save()
+    foundation_model.save()
+    if mamba_predictor: mamba_predictor.save()
+    if online_learner: online_learner.save()
+
+
+def _load_or_train_models():
+    global lstm_predictor, online_learner
+    tft_predictor.load()
+    rl_agent.load()
+    ensemble.load()
+    stat_model.load()
+    markov_model.load()
+    foundation_model.load()
+    if mamba_predictor: mamba_predictor.load()
+    
+    # Trigger background train if missing
+    needs_train = (
+        not tft_predictor.trained or 
+        not rl_agent.trained or 
+        not foundation_model.trained or 
+        (mamba_predictor and not mamba_predictor.trained) or 
+        (lstm_predictor and not lstm_predictor.trained)
+    )
+    if needs_train:
+        print("[Server] Key models missing. Starting background training...")
+        import threading
+        threading.Thread(target=_run_background_retrain, daemon=True).start()
+
+    # Lazy loads
+    try:
+        from models.lstm_model import LSTMPredictor
+        lstm_predictor = LSTMPredictor()
+        lstm_predictor.load()
+    except: pass
+
+    try:
+        from learning.online import OnlineLearner
+        online_learner = OnlineLearner()
+        online_learner.load()
+    except: pass
+
+
+def _run_background_retrain():
+    global is_retraining
+    if is_retraining: return
+    is_retraining = True
+    try:
+        rolls = get_rolls_for_training()
+        X, y = prepare_sequences(rolls, seq_len=60, markov_model=markov_model)
+        if len(X) > 100:
+            tft_predictor.train(X, y, epochs=3)
+            stat_model.train([r['color'] for r in rolls])
+            rl_agent.train(rolls, episodes=1)
+            
+            if mamba_predictor:
+                mamba_predictor.train_model(X, y, epochs=3)
+                mamba_predictor.save()
+            if lstm_predictor:
+                lstm_predictor.train(X, y, epochs=5)
+                lstm_predictor.save()
+            if foundation_model:
+                foundation_model.train([r['color'] for r in rolls])
+                foundation_model.save()
+                
+            tft_predictor.save()
+            rl_agent.save()
+    finally:
+        is_retraining = False
+
+
+# ── Core Logic ───────────────────────────────────────────────────────────────
+
+def _get_all_model_predictions() -> dict:
+    """Helper to gather predictions from all 7 models."""
+    preds = {}
+    import numpy as np
+    
+    # 1. Statistical & Markov & Foundation
+    if len(recent_colors_cache) >= 20:
+        preds['statistical'] = stat_model.predict(recent_colors_cache)
+        preds['markov'] = markov_model.predict(recent_colors_cache)
+        preds['foundation'] = foundation_model.predict(recent_colors_cache)
+    
+    # 2. Sequential models (TFT, Mamba, LSTM)
+    if len(recent_colors_cache) >= 60:
+        rolls = get_recent_rolls(150)
+        rolls_dicts = list(reversed(rolls))
+        all_c_for_markov = [r['color'] for r in rolls_dicts]
+        
+        seq = []
+        for j in range(len(rolls_dicts) - 60, len(rolls_dicts)):
+            m_p = markov_model.predict(all_c_for_markov[:j])
+            feat = compute_features_array(rolls_dicts, j, lookback=20, markov_probs=m_p)
+            if feat is not None: seq.append(feat)
+            
+        if len(seq) == 60:
+            X = np.array([seq], dtype=np.float32)
+            preds['tft'] = tft_predictor.predict(X)
+            if mamba_predictor and mamba_predictor.trained:
+                preds['mamba'] = mamba_predictor.predict(X)
+            if lstm_predictor and lstm_predictor.trained:
+                preds['lstm'] = lstm_predictor.predict(X)
+                
+    # 3. RL Agent
+    if len(recent_colors_cache) >= 30:
+        preds['rl_agent'] = rl_agent.predict(recent_colors_cache)
+        
+    return preds
+
+
+def _predict_next(regime_info: dict = None, drift: bool = False) -> dict:
+    global user_bankroll, user_kelly_mult
+    
+    model_preds = _get_all_model_predictions()
+    if not model_preds:
+        return {'action': 'SKIP', 'skip_reason': 'Not enough data', 'probs': {'T': 0.33, 'CT': 0.33, 'Bonus': 0.33}, 'model_votes': {}}
+
+    ensemble_res = ensemble.predict(model_preds)
+    
+    # Kịch Kim Decision
+    decision = make_decision(
+        ensemble_res, 
+        user_bankroll, 
+        regime_info=regime_info,
+        kelly_mult=user_kelly_mult
+    )
+    
+    return decision
+
+
+def _process_roll_sync(roll: RollInput, color: str):
+    global recent_colors_cache, user_bankroll, last_pred, online_learner
+    
+    # 1. Storage
+    insert_roll(roll.round_id, roll.outcome, color, roll.timestamp)
+    recent_colors_cache.append(color)
+    if len(recent_colors_cache) > 500: recent_colors_cache = recent_colors_cache[-500:]
+    
+    # 2. Ensemble Update
+    all_preds_last = _get_all_model_predictions()
+    ensemble.update_weights(all_preds_last, color)
+    
+    # 3. RL Update
+    if last_pred and rl_agent:
+        rl_vote = last_pred.get('model_votes', {}).get('rl_agent', {}).get('vote', 'skip')
+        rl_action = f'bet_{rl_vote.lower()}' if rl_vote != 'skip' else 'skip'
+        rl_agent.update(recent_colors_cache, rl_action, color)
+
+    # 4. Online Learner & Drift
+    drift_detected = False
+    if online_learner and len(recent_colors_cache) >= 20:
+        m_p = markov_model.predict(recent_colors_cache[:-1])
+        h_tmp = health_scorer.compute(recent_colors_cache[:-1])
+        reg_info = h_tmp.get('regime')
+        
+        drift_res = online_learner.update(recent_colors_cache[:-1], color, markov_probs=m_p, regime_info=reg_info)
+        drift_detected = drift_res.get('drift', False)
+        
+        if drift_detected or (drift_res.get('n_updates', 0) % 500 == 0):
+            import threading
+            threading.Thread(target=_run_background_retrain, daemon=True).start()
+
+    # 5. Final Prediction + Health
+    health_data = health_scorer.compute(recent_colors_cache, drift=drift_detected)
+    prediction = _predict_next(regime_info=health_data.get('regime'), drift=drift_detected)
+    
+    # 6. Database tracking
+    update_prediction_result(roll.round_id, color)
+    insert_prediction(roll.round_id + 1, prediction['color'], prediction['confidence'], prediction.get('model_votes', {}), prediction.get('bet_amount', 0))
+    
+    return prediction, health_data
+
+
+# ── FastAPI Endpoints ───────────────────────────────────────────────────────
+
+app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.post("/api/roll")
+async def receive_roll(roll: RollInput):
+    color = roll.color or outcome_to_color(roll.outcome)
+    prediction, health_data = await run_in_threadpool(_process_roll_sync, roll, color)
+    
+    global last_pred, last_prediction_timestamp
+    last_pred = prediction
+    last_prediction_timestamp = int(time.time() * 1000)
+    
+    ws_data = {
+        'type': 'roll',
+        'roll': {'round_id': roll.round_id, 'outcome': roll.outcome, 'color': color},
+        'prediction': prediction,
+        'health': health_data,
+        'recent': recent_colors_cache[-30:],
+    }
+    await _broadcast(ws_data)
+    return {"ok": True, "prediction": prediction}
+
+@app.post("/api/bankroll")
+async def set_bankroll(data: BankrollUpdate):
+    global user_bankroll, user_kelly_mult
+    user_bankroll = data.bankroll
+    if data.kelly_mult is not None:
+        user_kelly_mult = data.kelly_mult
+    return {"ok": True, "bankroll": user_bankroll, "kelly_mult": user_kelly_mult}
+
+# ... (Additional standard endpoints like /api/stats, /api/health omitted for brevity but should be mapped to the new logic)
+@app.get("/api/predict")
+async def predict():
+    return {"prediction": _predict_next(), "recent": recent_colors_cache[-30:]}
+
+@app.get("/api/health")
+async def health():
+    return health_scorer.compute(recent_colors_cache)
+
+@app.post("/api/backtest")
+def backtest_endpoint(params: BacktestParams):
+    try:
+        from database import get_recent_rolls
+        # Get enough history for warmup + simulation
+        rolls = get_recent_rolls(1500)
+        colors = [r['color'] for r in reversed(rolls)]
+        result = run_backtest(
+            colors=colors,
+            strategy=params.strategy,
+            bankroll=params.bankroll,
+            confidence_threshold=params.confidence_threshold
+        )
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/montecarlo")
+def montecarlo_endpoint(params: MonteCarloParams):
+    try:
+        colors = recent_colors_cache[-500:]
+        result = run_monte_carlo(
+            historical_colors=colors,
+            n_simulations=params.n_simulations,
+            n_rounds=params.n_rounds,
+            bankroll=params.bankroll,
+            bet_fraction=params.bet_fraction
+        )
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/stats")
+async def stats():
+    return {
+        "overall": get_overall_stats(), 
+        "weights": ensemble.get_weights(),
+        "predictions": get_prediction_stats(),
+        "streaks": get_streak_analysis()
+    }
+
+@app.get("/api/recent")
+async def get_recent(limit: int = 50):
+    return {"rolls": [{"color": c} for c in recent_colors_cache[-limit:]], "total": len(recent_colors_cache)}
+
+# WebSocket
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    connected_clients.append(ws)
+    try:
+        prediction = _predict_next()
+        await ws.send_json({
+            'type': 'init',
+            'recent': recent_colors_cache[-50:],
+            'prediction': prediction,
+            'health': health_scorer.compute(recent_colors_cache),
+            'model_weights': ensemble.get_weights(),
+            'stats': {
+                "overall": get_overall_stats(),
+                "predictions": get_prediction_stats(),
+                "streaks": get_streak_analysis()
+            },
+        })
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        connected_clients.remove(ws)
+
+async def _broadcast(data: dict):
+    for ws in list(connected_clients):
+        try: await ws.send_json(data)
+        except: connected_clients.remove(ws)
+
+# Static Files
+DASHBOARD_DIR = os.path.join(SERVER_DIR, '..', 'dashboard')
+app.mount("/static", StaticFiles(directory=DASHBOARD_DIR), name="static")
+
+@app.get("/")
+async def serve_dashboard():
+    return FileResponse(os.path.join(DASHBOARD_DIR, 'index.html'))
+
+@app.get("/style.css")
+async def serve_css():
+    return FileResponse(os.path.join(DASHBOARD_DIR, 'style.css'))
+
+@app.get("/dashboard.js")
+async def serve_js():
+    return FileResponse(os.path.join(DASHBOARD_DIR, 'dashboard.js'))
+
+if __name__ == '__main__':
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
