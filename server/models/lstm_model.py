@@ -9,11 +9,11 @@ SAVE_PATH = os.path.join(os.path.dirname(__file__), 'saved', 'lstm_weights.weigh
 
 # Lazy import to avoid slow startup
 _model = None
+import tensorflow as tf # Kịch Kim 4.0: Need tf globally for Attention class
 
 
 def focal_loss(gamma=2.0, alpha=0.25):
     """Sigmoid Focal Loss to handle class imbalance (Item 2)."""
-    import tensorflow as tf
     def focal_loss_fixed(y_true, y_pred):
         epsilon = tf.keras.backend.epsilon()
         y_pred = tf.clip_by_value(y_pred, epsilon, 1.0 - epsilon)
@@ -26,27 +26,54 @@ def focal_loss(gamma=2.0, alpha=0.25):
     return focal_loss_fixed
 
 
+class Attention(tf.keras.layers.Layer):
+    """Additive Attention Layer (Kịch Kim 4.0)."""
+    def __init__(self, **kwargs):
+        super(Attention, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.W = self.add_weight(name='attn_weight', shape=(input_shape[-1], 1), initializer='glorot_uniform', trainable=True)
+        self.b = self.add_weight(name='attn_bias', shape=(input_shape[1], 1), initializer='zeros', trainable=True)
+        super(Attention, self).build(input_shape)
+
+    def call(self, x):
+        # x shape: [batch, seq_len, features]
+        e = tf.keras.backend.tanh(tf.keras.backend.dot(x, self.W) + self.b)
+        a = tf.keras.backend.softmax(e, axis=1)
+        output = x * a
+        return tf.keras.backend.sum(output, axis=1)
+
+
 def _build_model(seq_len: int, n_features: int):
-    """Build the BiLSTM model architecture."""
-    from tensorflow.keras.models import Sequential
+    """Build the Elite BiLSTM + Attention architecture (Kịch Kim 4.0)."""
+    from tensorflow.keras.models import Sequential, Model
     from tensorflow.keras.layers import (
-        Bidirectional, LSTM, Dense, Dropout, BatchNormalization, Input
+        Bidirectional, LSTM, Dense, Dropout, BatchNormalization, Input, Concatenate
     )
 
-    model = Sequential([
-        Input(shape=(seq_len, n_features)),
-        Bidirectional(LSTM(128, return_sequences=True)),
-        Dropout(0.3),
-        BatchNormalization(),
-        Bidirectional(LSTM(64, return_sequences=False)),
-        Dropout(0.3),
-        BatchNormalization(),
-        Dense(32, activation='relu'),
-        Dropout(0.2),
-        Dense(3, activation='softmax')  # T / CT / Bonus
-    ])
+    inputs = Input(shape=(seq_len, n_features))
+    
+    # Layer 1: Global Context
+    x = Bidirectional(LSTM(128, return_sequences=True))(inputs)
+    x = Dropout(0.3)(x)
+    x = BatchNormalization()(x)
+    
+    # Layer 2: Pattern Refinement
+    x = Bidirectional(LSTM(64, return_sequences=True))(x)
+    x = Dropout(0.3)(x)
+    
+    # Layer 3: Attention Mechanism (The "Focus")
+    attn_out = Attention()(x)
+    
+    # Bottleneck & Head
+    x = Dense(64, activation='relu')(attn_out)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+    outputs = Dense(3, activation='softmax')(x)
 
-    # Item 2: Use Focal Loss instead of categorical_crossentropy
+    model = Model(inputs=inputs, outputs=outputs)
+
+    # Item 2: Use Focal Loss with Elite optimizer
     model.compile(
         optimizer='adam',
         loss=focal_loss(gamma=2.0, alpha=0.25),

@@ -67,24 +67,20 @@ def main():
     # Prepare common features count
     n_features = X.shape[2]
     
-    # Mamba
-    print("Starting Mamba...")
+    # Mamba (Max Ping 4.0 Upgrade)
+    print("Starting Mamba (Kịch Kim 4.0)...")
     mamba = MambaPredictor(n_features=n_features)
-    if not os.path.exists(os.path.join(SERVER_DIR, 'models', 'saved', 'mamba_weights.pth')):
-        mamba.train_model(X, y, epochs=10) 
-        mamba.save()
-    else:
-        print("  Skipping Mamba: Already exists.")
+    # Always retrain for 4.0 upgrade
+    mamba.train_model(X, y, epochs=50) 
+    mamba.save()
     
-    # LSTM
-    print("Starting LSTM...")
+    # LSTM (Max Ping 4.0 Upgrade)
+    print("Starting LSTM (Kịch Kim 4.0)...")
     lstm = LSTMPredictor(n_features=n_features)
-    if not os.path.exists(os.path.join(SERVER_DIR, 'models', 'saved', 'lstm_weights.weights.h5')):
-        lstm.build()
-        lstm.train(X, y, epochs=5)
-        lstm.save()
-    else:
-        print("  Skipping LSTM: Already exists.")
+    # Always retrain for 4.0 upgrade
+    lstm.build()
+    lstm.train(X, y, epochs=50)
+    lstm.save()
     
     # TFT (True Temporal)
     print("Starting TFT (True Temporal)...")

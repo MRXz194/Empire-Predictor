@@ -53,6 +53,7 @@ connected_clients: list[WebSocket] = []
 recent_colors_cache: list[str] = []  # in-memory cache of recent colors
 last_pred = None
 last_prediction_timestamp = 0
+last_processed_round_id = 0 # Kịch Kim 4.5: Anti-duplicate guard
 
 # Bankroll tracking
 user_bankroll = 100.0
@@ -177,7 +178,7 @@ def _run_background_retrain():
 
 # ── Core Logic ───────────────────────────────────────────────────────────────
 
-def _get_all_model_predictions() -> dict:
+def _get_all_model_predictions(regime: str = 'STABLE') -> dict:
     """Helper to gather predictions from all 7 models."""
     preds = {}
     import numpy as np
@@ -210,7 +211,7 @@ def _get_all_model_predictions() -> dict:
                 
     # 3. RL Agent
     if len(recent_colors_cache) >= 30:
-        preds['rl_agent'] = rl_agent.predict(recent_colors_cache)
+        preds['rl_agent'] = rl_agent.predict(recent_colors_cache, regime=regime)
         
     return preds
 
@@ -218,7 +219,15 @@ def _get_all_model_predictions() -> dict:
 def _predict_next(regime_info: dict = None, drift: bool = False) -> dict:
     global user_bankroll, user_kelly_mult
     
-    model_preds = _get_all_model_predictions()
+    # Kịch Kim 3.1: Extract string safely
+    if regime_info and isinstance(regime_info, dict):
+        regime_str = regime_info.get('regime', 'STABLE')
+        if isinstance(regime_str, dict): # nested check
+            regime_str = regime_str.get('regime', 'STABLE')
+    else:
+        regime_str = 'STABLE'
+        
+    model_preds = _get_all_model_predictions(regime=regime_str)
     if not model_preds:
         return {'action': 'SKIP', 'skip_reason': 'Not enough data', 'probs': {'T': 0.33, 'CT': 0.33, 'Bonus': 0.33}, 'model_votes': {}}
 
@@ -236,29 +245,41 @@ def _predict_next(regime_info: dict = None, drift: bool = False) -> dict:
 
 
 def _process_roll_sync(roll: RollInput, color: str):
-    global recent_colors_cache, user_bankroll, last_pred, online_learner
+    global recent_colors_cache, user_bankroll, last_pred, online_learner, last_processed_round_id
     
+    # 0. Duplicate Guard (Kịch Kim 4.5)
+    if roll.round_id <= last_processed_round_id:
+        print(f"[Core] Skipping duplicate round_id: {roll.round_id}")
+        return None, None
+    last_processed_round_id = roll.round_id
+
     # 1. Storage
     insert_roll(roll.round_id, roll.outcome, color, roll.timestamp)
     recent_colors_cache.append(color)
     if len(recent_colors_cache) > 500: recent_colors_cache = recent_colors_cache[-500:]
     
-    # 2. Ensemble Update
-    all_preds_last = _get_all_model_predictions()
+    # 2. Regime Detection for RL & Online
+    h_tmp = health_scorer.compute(recent_colors_cache)
+    # Extract the string name from the regime dict
+    regime_data = h_tmp.get('regime', {})
+    regime_str = regime_data.get('regime', 'STABLE') if isinstance(regime_data, dict) else str(regime_data)
+
+    # 3. Ensemble Update
+    all_preds_last = _get_all_model_predictions(regime=regime_str)
     ensemble.update_weights(all_preds_last, color)
     
-    # 3. RL Update
+    # 4. RL Update
     if last_pred and rl_agent:
         rl_vote = last_pred.get('model_votes', {}).get('rl_agent', {}).get('vote', 'skip')
         rl_action = f'bet_{rl_vote.lower()}' if rl_vote != 'skip' else 'skip'
-        rl_agent.update(recent_colors_cache, rl_action, color)
+        rl_agent.update(recent_colors_cache, rl_action, color, regime=regime_str)
 
-    # 4. Online Learner & Drift
+    # 5. Online Learner & Drift
     drift_detected = False
     if online_learner and len(recent_colors_cache) >= 20:
         m_p = markov_model.predict(recent_colors_cache[:-1])
-        h_tmp = health_scorer.compute(recent_colors_cache[:-1])
-        reg_info = h_tmp.get('regime')
+        # Online learner needs the FULL dict (switch_rate, etc)
+        reg_info = regime_data 
         
         drift_res = online_learner.update(recent_colors_cache[:-1], color, markov_probs=m_p, regime_info=reg_info)
         drift_detected = drift_res.get('drift', False)

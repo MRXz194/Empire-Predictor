@@ -81,8 +81,13 @@ class OnlineLearner:
 
         # Kịch Kim Enrichment: Regime signals
         if regime_info:
-            features['switch_rate'] = regime_info.get('switch_rate', 0.5)
-            features['is_streak'] = (1.0 if regime_info.get('regime') == 'STREAK' else 0.0)
+            if isinstance(regime_info, dict):
+                features['switch_rate'] = regime_info.get('switch_rate', 0.5)
+                features['is_streak'] = (1.0 if regime_info.get('regime') == 'STREAK' else 0.0)
+            else:
+                # Fallback for string input
+                features['switch_rate'] = 0.5
+                features['is_streak'] = (1.0 if regime_info == 'STREAK' else 0.0)
 
         return features
 

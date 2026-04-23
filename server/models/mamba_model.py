@@ -31,9 +31,13 @@ class MambaBlock(nn.Module):
             padding=d_conv - 1,
         )
 
-        # S6 components
+        # S6 components (Max Ping 4.0)
         self.x_proj = nn.Linear(self.d_inner, dt_rank := 4 + d_state * 2, bias=False)
         self.dt_proj = nn.Linear(dt_rank, self.d_inner, bias=True)
+        
+        # Proper S6 Matrices
+        self.A_log = nn.Parameter(torch.log(torch.arange(1, d_state + 1).float().repeat(self.d_inner, 1)))
+        self.D = nn.Parameter(torch.ones(self.d_inner))
 
         self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=False)
 
@@ -55,7 +59,7 @@ class MambaBlock(nn.Module):
 
 
 class MambaPredictor(nn.Module):
-    def __init__(self, n_features=46, d_model=64, n_layers=2):
+    def __init__(self, n_features=46, d_model=128, n_layers=4):
         super().__init__()
         self.n_features = n_features
         self.embedding = nn.Linear(n_features, d_model)
@@ -77,7 +81,7 @@ class MambaPredictor(nn.Module):
             x = x + layer(x) # residual
         x = self.norm(x)
         x = x.mean(dim=1) # global avg pool
-        return F.softmax(self.head(x), dim=-1)
+        return self.head(x)
 
     def train_model(self, X: np.ndarray, y: np.ndarray, epochs=20, batch_size=256):
         """Train using mini-batches to prevent OOM (Claude audit Item 3)."""
@@ -121,7 +125,8 @@ class MambaPredictor(nn.Module):
         self.eval()
         with torch.no_grad():
             x = torch.tensor(X_recent, dtype=torch.float32)
-            preds = self.forward(x).cpu().numpy()[0]
+            logits = self.forward(x)
+            preds = F.softmax(logits, dim=-1).cpu().numpy()[0]
             # Use .item() for JSON compatibility (Claude audit Item 1)
             return {'T': float(preds[0].item()), 'CT': float(preds[1].item()), 'Bonus': float(preds[2].item())}
 

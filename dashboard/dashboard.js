@@ -9,6 +9,7 @@ const WS_URL = 'ws://localhost:8000/ws';
 let ws = null;
 let reconnectTimer = null;
 let recentRolls = [];
+let lastHandledRoundId = 0; // Kịch Kim 4.5: Anti-duplicate guard
 
 
 // ── WebSocket Connection ────────────────────────────────────────────────────
@@ -70,6 +71,13 @@ function handleWSMessage(data) {
     }
 
     if (data.type === 'roll') {
+        const rid = data.roll?.round_id || 0;
+        if (rid <= lastHandledRoundId && rid !== 0) {
+            console.log('[WS] Skipping duplicate roll UI update:', rid);
+            return;
+        }
+        lastHandledRoundId = rid;
+
         // New roll received!
         if (data.recent) recentRolls = data.recent;
         renderRollDots(recentRolls, true);
