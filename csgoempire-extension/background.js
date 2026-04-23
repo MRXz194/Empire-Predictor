@@ -15,6 +15,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
+  if (message.type === 'sync_history') {
+    handleSyncHistory(message.data);
+    sendResponse({ ok: true });
+  }
+
   if (message.type === 'get_history') {
     getRollHistory().then(history => sendResponse({ history }));
     return true; // async response
@@ -68,10 +73,15 @@ async function sendToServer(rollData) {
     round_id: ext.round || 0,
     outcome: ext.winner ?? 0,
     color: mapCoin(ext.coin),
-    timestamp: rollData.timestamp || Date.now()
+    timestamp: rollData.timestamp || Date.now(),
+    history_full: (ext.rolls || []).map(r => mapOutcomeToColor(r)) // Kịch Kim 4.8
   };
 
   try {
+    if (payload.history_full && payload.history_full.length > 0) {
+      console.log(`${LOG_PREFIX} ⏩ Sending ${payload.history_full.length} history rounds to server.`);
+    }
+
     const resp = await fetch(SERVER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -85,6 +95,31 @@ async function sendToServer(rollData) {
     // Server offline — silently ignore, data is in storage as backup
     console.log(`${LOG_PREFIX} ⚠️ Server offline, data saved locally`);
   }
+}
+
+// ── Kịch Kim 4.6: POST bulk history tới server ───────────────────────────
+async function handleSyncHistory(syncData) {
+  try {
+    const resp = await fetch('http://localhost:8000/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(syncData)
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      console.log(`${LOG_PREFIX} 🔄 History Synced: ${data.synced} rolls`);
+    }
+  } catch (e) {
+    console.log(`${LOG_PREFIX} ⚠️ Sync failed (server offline?)`);
+  }
+}
+
+function mapOutcomeToColor(outcome) {
+  const v = parseInt(outcome);
+  if (v === 0) return 'Bonus';
+  if (v >= 1 && v <= 7) return 'T';
+  if (v >= 8 && v <= 14) return 'CT';
+  return null;
 }
 
 function mapCoin(coin) {

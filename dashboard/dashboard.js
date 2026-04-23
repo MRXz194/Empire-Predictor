@@ -93,6 +93,13 @@ function handleWSMessage(data) {
         flashPanel('panel-realtime');
     }
 
+    if (data.type === 'sync') {
+        recentRolls = data.recent || [];
+        lastHandledRoundId = data.last_id || lastHandledRoundId;
+        renderRollDots(recentRolls);
+        console.log('[WS] 🔄 Sequence synchronized with live floor. Ready.');
+    }
+
     if (data.type === 'pong') return;
 }
 

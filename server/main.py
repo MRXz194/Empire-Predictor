@@ -54,6 +54,7 @@ recent_colors_cache: list[str] = []  # in-memory cache of recent colors
 last_pred = None
 last_prediction_timestamp = 0
 last_processed_round_id = 0 # Kịch Kim 4.5: Anti-duplicate guard
+is_warmed_up = False        # Kịch Kim 4.6: Sequence Contiguity flag
 
 # Bankroll tracking
 user_bankroll = 100.0
@@ -71,6 +72,7 @@ class RollInput(BaseModel):
     outcome: int
     color: Optional[str] = None
     timestamp: Optional[int] = None
+    history_full: Optional[list[str]] = None # Kịch Kim 4.8
 
 class BacktestParams(BaseModel):
     strategy: str = 'ensemble'
@@ -91,9 +93,14 @@ async def lifespan(app: FastAPI):
     """Startup: init DB + load/train models."""
     init_db()
     
-    global recent_colors_cache
+    global recent_colors_cache, last_processed_round_id
     recent = get_recent_rolls(500)
     recent_colors_cache = [r['color'] for r in reversed(recent)]
+    if recent:
+        last_processed_round_id = recent[0]['round_id']
+        print(f"[Lifespan] Initialized last_processed_round_id to {last_processed_round_id}")
+        # Kịch Kim 4.6 Debug
+        print(f"[Core] Cache Purity Check: First={recent_colors_cache[0]}, Last={recent_colors_cache[-1]} (Total: {len(recent_colors_cache)})")
     
     import threading
     threading.Thread(target=_load_or_train_models, daemon=True).start()
@@ -180,22 +187,25 @@ def _run_background_retrain():
 
 def _get_all_model_predictions(regime: str = 'STABLE') -> dict:
     """Helper to gather predictions from all 7 models."""
+    global is_warmed_up, mamba_predictor, tft_predictor, lstm_predictor
     preds = {}
     import numpy as np
     
-    # 1. Statistical & Markov & Foundation
+    # 1. Statistical & Markov & Foundation (Basic patterns)
     if len(recent_colors_cache) >= 20:
         preds['statistical'] = stat_model.predict(recent_colors_cache)
         preds['markov'] = markov_model.predict(recent_colors_cache)
         preds['foundation'] = foundation_model.predict(recent_colors_cache)
     
-    # 2. Sequential models (TFT, Mamba, LSTM)
-    if len(recent_colors_cache) >= 60:
+    # 2. Sequential models (TFT, Mamba, LSTM) - Kịch Kim 4.6 Warm-up guard
+    if is_warmed_up:
+        # Fetch 150 from DB to ensure enough context for internal feature engineering
         rolls = get_recent_rolls(150)
         rolls_dicts = list(reversed(rolls))
         all_c_for_markov = [r['color'] for r in rolls_dicts]
         
         seq = []
+        # Need exactly 60 steps for the sequential models input
         for j in range(len(rolls_dicts) - 60, len(rolls_dicts)):
             m_p = markov_model.predict(all_c_for_markov[:j])
             feat = compute_features_array(rolls_dicts, j, lookback=20, markov_probs=m_p)
@@ -208,6 +218,10 @@ def _get_all_model_predictions(regime: str = 'STABLE') -> dict:
                 preds['mamba'] = mamba_predictor.predict(X)
             if lstm_predictor and lstm_predictor.trained:
                 preds['lstm'] = lstm_predictor.predict(X)
+    else:
+        # Neutral if not warmed up
+        n_p = {'T': 0.33, 'CT': 0.33, 'Bonus': 0.08}
+        preds['tft'] = n_p; preds['mamba'] = n_p; preds['lstm'] = n_p
                 
     # 3. RL Agent
     if len(recent_colors_cache) >= 30:
@@ -245,18 +259,49 @@ def _predict_next(regime_info: dict = None, drift: bool = False) -> dict:
 
 
 def _process_roll_sync(roll: RollInput, color: str):
-    global recent_colors_cache, user_bankroll, last_pred, online_learner, last_processed_round_id
+    global recent_colors_cache, user_bankroll, last_pred, online_learner, last_processed_round_id, is_warmed_up
     
-    # 0. Duplicate Guard (Kịch Kim 4.5)
+    # 0. Gap & Duplicate Guard (Kịch Kim 4.6 Elite Sync)
     if roll.round_id <= last_processed_round_id:
         print(f"[Core] Skipping duplicate round_id: {roll.round_id}")
         return None, None
+    
+    if last_processed_round_id != 0 and roll.round_id > last_processed_round_id + 1:
+        gap = roll.round_id - last_processed_round_id
+        print(f"[Core] ⚠️ GAP detected ({gap} rounds)! LastID={last_processed_round_id}, NewID={roll.round_id}")
+        if roll.history_full:
+            recent_colors_cache = roll.history_full[-500:]
+            is_warmed_up = True if len(recent_colors_cache) >= 60 else False
+            print(f"[Core] 🔄 Sequence Healing: Synced {len(recent_colors_cache)} rounds from live socket. Ready={is_warmed_up}")
+        else:
+            print(f"[Core] ❌ No live history in payload. Sequence broken. Flushing.")
+            recent_colors_cache = []
+            is_warmed_up = False
+    
+    # Kịch Kim 4.8 Power-up: Force override if current cache is empty or suspect
+    if (len(recent_colors_cache) < 60 or last_processed_round_id == 0) and roll.history_full:
+        recent_colors_cache = roll.history_full[-500:]
+        print(f"[Core] ⚡ Elite Bootstrapping: Loaded {len(recent_colors_cache)} rounds. Ready.")
+        is_warmed_up = True if len(recent_colors_cache) >= 60 else False
+
     last_processed_round_id = roll.round_id
 
     # 1. Storage
     insert_roll(roll.round_id, roll.outcome, color, roll.timestamp)
-    recent_colors_cache.append(color)
+    
+    # Kịch Kim 4.8: Only append if NOT already synced in history_full
+    # Most Socket 'roll' events ALREADY include the current result as the last item.
+    if roll.history_full and len(roll.history_full) > 0 and roll.history_full[-1] == color:
+        # Already included in sync, do nothing
+        pass
+    else:
+        recent_colors_cache.append(color)
+        
     if len(recent_colors_cache) > 500: recent_colors_cache = recent_colors_cache[-500:]
+    
+    # Warm-up check (Min 60 contiguous for LSTM/Mamba)
+    if len(recent_colors_cache) >= 60:
+        is_warmed_up = True
     
     # 2. Regime Detection for RL & Online
     h_tmp = health_scorer.compute(recent_colors_cache)
@@ -326,9 +371,45 @@ async def receive_roll(roll: RollInput):
         'prediction': prediction,
         'health': health_data,
         'recent': recent_colors_cache[-30:],
+        'warmed_up': is_warmed_up
     }
     await _broadcast(ws_data)
-    return {"ok": True, "prediction": prediction}
+    return {"status": "ok", "round_id": roll.round_id}
+
+@app.post("/api/sync")
+async def sync_history(data: dict):
+    """Kịch Kim 4.6: Bulk sync of contiguous history from extension."""
+    global recent_colors_cache, last_processed_round_id, is_warmed_up
+    
+    rolls = data.get('rolls', [])
+    if not rolls:
+        return {"status": "error", "message": "No rolls provided"}
+    
+    # 1. Persist to DB first
+    for r in rolls:
+        rid = r.get('round_id', 0)
+        color = r.get('color')
+        if rid > 0 and color:
+            insert_roll(rid, 0, color) # outcome 0 for historical sync if unknown
+    
+    # 2. Update memory cache
+    new_colors = [r.get('color') for r in rolls if r.get('color')]
+    if new_colors:
+        recent_colors_cache = new_colors[-500:]
+        last_processed_round_id = max(r.get('round_id', 0) for r in rolls)
+        if len(recent_colors_cache) >= 60:
+            is_warmed_up = True
+        
+        print(f"[Core] 🔄 Synced & Persisted {len(new_colors)} rolls. Ready={is_warmed_up}. LastID={last_processed_round_id}")
+        
+        # Broadcast sync to dashboard
+        await _broadcast({
+            'type': 'sync',
+            'recent': recent_colors_cache[-100:], # Send more for full display
+            'last_id': last_processed_round_id
+        })
+        
+    return {"status": "ok", "synced": len(new_colors)}
 
 @app.post("/api/bankroll")
 async def set_bankroll(data: BankrollUpdate):

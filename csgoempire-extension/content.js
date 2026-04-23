@@ -22,14 +22,14 @@
         const raw = event.data;
         if (typeof raw !== 'string' || raw.length <= 3) return;
         parseSocketIO(raw, shortUrl);
-      } catch (e) {}
+      } catch (e) { }
     });
 
     return ws;
   };
 
   Object.keys(OriginalWebSocket).forEach(key => {
-    try { window.WebSocket[key] = OriginalWebSocket[key]; } catch(e) {}
+    try { window.WebSocket[key] = OriginalWebSocket[key]; } catch (e) { }
   });
   window.WebSocket.prototype = OriginalWebSocket.prototype;
   window.WebSocket.CONNECTING = 0;
@@ -66,7 +66,7 @@
     if (!Array.isArray(parsed) || parsed.length < 2) return;
 
     const eventName = parsed[0];
-    const payload   = parsed[1];
+    const payload = parsed[1];
 
     // ── Chỉ lấy 3 events cần thiết ──────────────────────────────────────
     if (eventName === 'roll') {
@@ -92,6 +92,8 @@
     }
   }
 
+  // ── Kịch Kim 4.8: Sync chuyển hoàn toàn sang Socket History ────────────────
+
   // ── Gửi roll data lên background ────────────────────────────────────────
   function sendRoll(eventName, payload) {
     const rollData = {
@@ -99,20 +101,21 @@
       eventName: eventName,
       raw: payload,
       extracted: {
-        round:  payload.round  ?? null,
+        round: payload.round ?? null,
         winner: payload.winner ?? null,   // số 0-14
-        coin:   payload.coin   ?? null,   // "ct", "t", "bonus"
+        coin: payload.coin ?? null,   // "ct", "t", "bonus"
         nextRound: payload.nextRound ?? null,
-        rolls:  payload.rolls  ?? [],     // mảng animation
+        rolls: payload.rolls ?? [],     // mảng animation
       }
     };
 
     window.postMessage({
       source: 'csgoempire_tracker',
-      type:   'roll_event',
-      data:   rollData
+      type: 'roll_event',
+      data: rollData
     }, '*');
   }
 
-  console.log(`%c${LOG_PREFIX} v3 Injected - Fixed namespace parser`, 'color:#68d391;font-weight:bold');
+  // Gỡ bỏ scrape cũ - Kịch Kim 4.8 chuyển sang Socket Sync
+  console.log(`%c${LOG_PREFIX} v4.8 Active - Socket History Sync Enabled`, 'color:#68d391;font-weight:bold');
 })();
