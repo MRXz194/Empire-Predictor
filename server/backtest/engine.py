@@ -1,5 +1,5 @@
 """
-engine.py - Tầng 5: Backtesting Engine (Synchronized with Kịch Kim 2.0)
+engine.py — Backtesting Engine (Synchronized with Empire-Predictor 4.8)
 """
 import os
 import sys
@@ -24,7 +24,7 @@ def run_backtest(colors: list[str], strategy: str = 'ensemble',
                  warmup: int = 1000, kelly_mult: float = 0.5) -> dict:
     """
     Replay historical color sequence and simulate betting.
-    Supports all 7 'Kịch Kim 2.0' models.
+    Supports all 7 'Empire-Predictor' modules.
     """
     if len(colors) < warmup + 50:
         return {'error': 'Not enough data', 'min_required': warmup + 50}

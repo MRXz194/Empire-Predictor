@@ -82,7 +82,7 @@ def bet_size_output(kelly_fraction: float, bankroll: float, min_bet: float = 1.0
 
 
 def make_decision(ensemble_result: dict, bankroll: float = 100.0,
-                   min_bet: float = 1.0, confidence_threshold: float = 0.55,
+                   min_bet: float = 1.0, confidence_threshold: float = 0.45,
                    regime_info: dict = None, kelly_mult: float = 0.5) -> dict:
     """
     Full decision pipeline: ensemble → confidence filter → kelly → bet size.

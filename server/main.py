@@ -77,7 +77,7 @@ class RollInput(BaseModel):
 class BacktestParams(BaseModel):
     strategy: str = 'ensemble'
     bankroll: float = 100.0
-    confidence_threshold: float = 0.55
+    confidence_threshold: float = 0.45
 
 class MonteCarloParams(BaseModel):
     n_simulations: int = 10000
