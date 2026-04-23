@@ -9,9 +9,11 @@
 - [Folder Structure](#folder-structure)
 - [API Endpoints](#api-endpoints)
 - [Technical Documentation](#technical-documentation)
-- [Operational Workflows](docs/WORKFLOW.md)
-- [Backtesting & Validation](docs/BACKTESTING.md)
-- [Optimization & Troubleshooting](docs/OPTIMIZATION.md)
+  - [📖 System Flow & Sequence](docs/ARCHITECTURE.md)
+  - [🧠 Logic Layer Breakdown](docs/MODULES.md)
+  - [⚙️ Operational Workflows](docs/WORKFLOW.md)
+  - [🧪 Strategy Validation](docs/BACKTESTING.md)
+  - [🔧 Optimization & Maintenance](docs/OPTIMIZATION.md)
 
 ---
 
@@ -137,10 +139,11 @@ Empire-Predictor/
 │   └── dashboard.js              # Real-time UI logic
 │
 └── docs/                         # Technical Documentation
-    ├── ARCHITECTURE.md
-    ├── MODULES.md
-    ├── API.md
-    └── INSTALLATION.md
+    ├── ARCHITECTURE.md           # System flow & Sequence
+    ├── MODULES.md                # Logic layer breakdown
+    ├── WORKFLOW.md               # Operational pipelines
+    ├── BACKTESTING.md            # Strategy validation
+    └── OPTIMIZATION.md           # Retraining & Troubleshooting
 ```
 
 ---
