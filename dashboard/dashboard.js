@@ -61,6 +61,17 @@ function setConnectionStatus(connected) {
 // ── Handle WebSocket Messages ───────────────────────────────────────────────
 
 function handleWSMessage(data) {
+    // Kịch Kim 4.8: Diagnostic logging
+    const diagPanel = document.getElementById('diagnostic-panel');
+    const diagCount = document.getElementById('diag-count');
+    const diagLastId = document.getElementById('diag-last-id');
+    const diagWS = document.getElementById('diag-ws-status');
+    const diagLog = document.getElementById('diag-log');
+
+    if (diagPanel) diagPanel.style.display = 'block';
+    if (diagCount) diagCount.textContent = (parseInt(diagCount.textContent) || 0) + 1;
+    if (diagWS) diagWS.textContent = 'ONLINE';
+
     if (data.type === 'init') {
         recentRolls = data.recent || [];
         updatePrediction(data.prediction);
@@ -68,12 +79,17 @@ function handleWSMessage(data) {
         updateStats(data.stats);
         updateModelWeights(data.model_weights);
         renderRollDots(recentRolls);
+        if (diagLog) diagLog.textContent = 'INIT OK';
     }
 
     if (data.type === 'roll') {
         const rid = data.roll?.round_id || 0;
+        console.log('[WS] 📥 Roll Received:', rid);
+        if (diagLastId) diagLastId.textContent = rid;
+
         if (rid <= lastHandledRoundId && rid !== 0) {
-            console.log('[WS] Skipping duplicate roll UI update:', rid);
+            console.log('[WS] ⏩ Skipping duplicate roll UI update:', rid);
+            if (diagLog) diagLog.textContent = `SKIP DUP ${rid}`;
             return;
         }
         lastHandledRoundId = rid;
@@ -87,10 +103,20 @@ function handleWSMessage(data) {
         // Update round ID
         if (data.roll) {
             document.getElementById('round-id').textContent = `#${data.roll.round_id}`;
+            if (diagLog) diagLog.textContent = `NEW ROLL ${rid}`;
         }
 
         // Flash effect
         flashPanel('panel-realtime');
+    }
+
+    if (data.type === 'status') {
+        console.log('[WS] 💓 Heartbeat (Status Sync):', data.last_id);
+        if (diagLastId) diagLastId.textContent = data.last_id;
+        if (diagLog) diagLog.textContent = 'HEARTBEAT';
+        const totalEl = document.getElementById('total-rounds');
+        if (totalEl && data.recent_count) totalEl.textContent = data.recent_count;
+        return;
     }
 
     if (data.type === 'sync') {

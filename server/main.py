@@ -97,8 +97,11 @@ async def lifespan(app: FastAPI):
     recent = get_recent_rolls(500)
     recent_colors_cache = [r['color'] for r in reversed(recent)]
     if recent:
-        last_processed_round_id = recent[0]['round_id']
-        print(f"[Lifespan] Initialized last_processed_round_id to {last_processed_round_id}")
+        if recent:
+            last_processed_round_id = recent[0]['round_id']
+            print(f"[Lifespan] Initialized last_processed_round_id to {last_processed_round_id}")
+        else:
+            print("[Lifespan] Database is empty. last_processed_round_id initialized to 0.")
         # Kịch Kim 4.6 Debug
         print(f"[Core] Cache Purity Check: First={recent_colors_cache[0]}, Last={recent_colors_cache[-1]} (Total: {len(recent_colors_cache)})")
     
@@ -286,18 +289,20 @@ def _process_roll_sync(roll: RollInput, color: str):
 
     last_processed_round_id = roll.round_id
 
-    # 1. Storage
-    insert_roll(roll.round_id, roll.outcome, color, roll.timestamp)
-    
-    # Kịch Kim 4.8: Only append if NOT already synced in history_full
-    # Most Socket 'roll' events ALREADY include the current result as the last item.
-    if roll.history_full and len(roll.history_full) > 0 and roll.history_full[-1] == color:
-        # Already included in sync, do nothing
-        pass
+    # 1. Update memory cache (Kịch Kim 4.8.1 Fix: Always sync from history_full if available)
+    if roll.history_full and len(roll.history_full) > 0:
+        recent_colors_cache = roll.history_full[-500:]
+        is_warmed_up = True if len(recent_colors_cache) >= 60 else False
+        print(f"[Core] 🔄 Sync from Live Socket: {len(recent_colors_cache)} rounds. Tail: {recent_colors_cache[-3:]}")
     else:
+        # Fallback to single append
         recent_colors_cache.append(color)
-        
-    if len(recent_colors_cache) > 500: recent_colors_cache = recent_colors_cache[-500:]
+        if len(recent_colors_cache) > 500: recent_colors_cache = recent_colors_cache[-500:]
+        if len(recent_colors_cache) >= 60: is_warmed_up = True
+        print(f"[Core] ➕ Appended Roll: {color}. Total: {len(recent_colors_cache)}")
+
+    # 2. Database Storage
+    insert_roll(roll.round_id, roll.outcome, color, roll.timestamp)
     
     # Warm-up check (Min 60 contiguous for LSTM/Mamba)
     if len(recent_colors_cache) >= 60:
@@ -358,23 +363,44 @@ app.add_middleware(
 
 @app.post("/api/roll")
 async def receive_roll(roll: RollInput):
-    color = roll.color or outcome_to_color(roll.outcome)
-    prediction, health_data = await run_in_threadpool(_process_roll_sync, roll, color)
-    
-    global last_pred, last_prediction_timestamp
-    last_pred = prediction
-    last_prediction_timestamp = int(time.time() * 1000)
-    
-    ws_data = {
-        'type': 'roll',
-        'roll': {'round_id': roll.round_id, 'outcome': roll.outcome, 'color': color},
-        'prediction': prediction,
-        'health': health_data,
-        'recent': recent_colors_cache[-30:],
-        'warmed_up': is_warmed_up
-    }
-    await _broadcast(ws_data)
-    return {"status": "ok", "round_id": roll.round_id}
+    """Receive and process a new round result."""
+    try:
+        color = roll.color or outcome_to_color(roll.outcome)
+        print(f"[Core] 📥 Received Roll: Round={roll.round_id}, Color={color}")
+        
+        prediction, health_data = await run_in_threadpool(_process_roll_sync, roll, color)
+        
+        # If _process_roll_sync returns None (duplicate), we still want to notify dashboard if it was a valid sync
+        if prediction is None:
+             # Just inform the dashboard of the current state without triggering a new prediction logic
+             await _broadcast({
+                 'type': 'status', 
+                 'last_id': last_processed_round_id,
+                 'warmed_up': is_warmed_up
+             })
+             return {"status": "skipped", "round_id": roll.round_id}
+
+        global last_pred, last_prediction_timestamp
+        last_pred = prediction
+        last_prediction_timestamp = int(time.time() * 1000)
+        
+        ws_data = {
+            'type': 'roll',
+            'roll': {'round_id': roll.round_id, 'outcome': roll.outcome, 'color': color},
+            'prediction': prediction,
+            'health': health_data,
+            'recent': recent_colors_cache[-30:],
+            'warmed_up': is_warmed_up
+        }
+        await _broadcast(ws_data)
+        print(f"[Core] ✅ Processed & Broadcasted Roll: Round={roll.round_id}")
+        return {"status": "ok", "round_id": roll.round_id}
+        
+    except Exception as e:
+        print(f"[Core] ❌ ERROR processing roll {roll.round_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
 
 @app.post("/api/sync")
 async def sync_history(data: dict):

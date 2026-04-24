@@ -24,21 +24,32 @@
             <span class="version">v2.0 KỊCH KIM</span>
         </div>
         <div class="header-center">
-            <div class="status-badge" id="connection-status">
-                <span class="status-dot"></span>
-                <span>Connecting...</span>
-            </div>
-            <div class="stat-pill">
-                <span class="stat-label">Total Rounds</span>
-                <span class="stat-value" id="total-rounds">—</span>
+            <div id="connection-status" class="status-badge">
+                <div class="status-indicator"></div>
+                <span>Disconnected</span>
             </div>
         </div>
-        <div class="header-right">
-            <div class="bankroll-box">
-                <span class="bankroll-label">BANKROLL</span>
-                <input type="number" id="bankroll-input" value="100" min="1" step="1">
-            </div>
+    </header>
+
+    <!-- Kịch Kim 4.8: Diagnostic Floating Panel -->
+    <div id="diagnostic-panel"
+        style="position:fixed; bottom:20px; right:20px; background:rgba(0,0,0,0.8); color:#00ff88; padding:10px; border-radius:8px; font-family:monospace; font-size:12px; z-index:9999; border:1px solid #00ff88; display:none;">
+        <div>📡 WS: <span id="diag-ws-status">WAIT</span></div>
+        <div>🔢 Last ID: <span id="diag-last-id">—</span></div>
+        <div>⏱️ Received: <span id="diag-count">0</span></div>
+        <div>📝 Log: <span id="diag-log">Ready</span></div>
+    </div>
+    <div class="stat-pill">
+        <span class="stat-label">Total Rounds</span>
+        <span class="stat-value" id="total-rounds">—</span>
+    </div>
+    </div>
+    <div class="header-right">
+        <div class="bankroll-box">
+            <span class="bankroll-label">BANKROLL</span>
+            <input type="number" id="bankroll-input" value="100" min="1" step="1">
         </div>
+    </div>
     </header>
 
     <!-- ── Main Grid ───────────────────────────────────────────── -->
