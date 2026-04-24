@@ -284,20 +284,31 @@ def _process_roll_sync(roll: RollInput, color: str):
         print(f"[Core] ⚡ Elite Bootstrapping: Loaded {len(recent_colors_cache)} rounds. Ready.")
         is_warmed_up = True if len(recent_colors_cache) >= 60 else False
 
-    last_processed_round_id = roll.round_id
+    # Kịch Kim 4.8.3: Ultimate Sync (Greedy Append)
+    # Lấy history_full làm nền tảng.
+    if roll.history_full and len(roll.history_full) > 0:
+        new_cache = list(roll.history_full)
+        
+        # Nếu đây là một ván mới (round_id > last_processed_id), ta luôn luôn đảm bảo 
+        # kết quả 'color' mới nhất phải nằm cuối cùng của cache để predict cho ván TIẾP THEO.
+        # Socket rolls[] thường là history TRƯỚC ván này, nên ta append thẳng tay.
+        # Nếu socket 'nhanh' (đã có sẵn color), slice [-500:] sẽ tự lo liệu.
+        if roll.round_id > last_processed_round_id:
+             new_cache.append(color)
+        
+        recent_colors_cache = new_cache[-500:]
+    else:
+        # Fallback khi không có history_full (ví dụ đánh lẻ tẻ)
+        if roll.round_id > last_processed_round_id:
+            recent_colors_cache.append(color)
 
+    # Cập nhật ID ván cuối cùng đã xử lý
+    last_processed_round_id = roll.round_id
+    
     # 1. Storage
     insert_roll(roll.round_id, roll.outcome, color, roll.timestamp)
     
-    # Kịch Kim 4.8.1: Elite Cache Synchronization
-    # Nếu có history_full từ socket, dùng nó làm chuẩn tuyệt đối thay vì tự append mò mẫm.
-    if roll.history_full and len(roll.history_full) > 0:
-        recent_colors_cache = roll.history_full[-500:]
-        print(f"[Core] 🔄 Cache Sync via HistoryFull: Last={recent_colors_cache[-1]} (Total: {len(recent_colors_cache)})")
-    else:
-        # Fallback: Chỉ append nếu không có history_full
-        recent_colors_cache.append(color)
-        print(f"[Core] ➕ Cache Append (Fallback): {color}")
+    print(f"[Core] 🔄 Cache Synced (Direct): Last={recent_colors_cache[-1]}, Total={len(recent_colors_cache)}")
     
     # Warm-up check (Min 60 contiguous for LSTM/Mamba)
     if len(recent_colors_cache) >= 60:
@@ -309,15 +320,26 @@ def _process_roll_sync(roll: RollInput, color: str):
     regime_data = h_tmp.get('regime', {})
     regime_str = regime_data.get('regime', 'STABLE') if isinstance(regime_data, dict) else str(regime_data)
 
-    # 3. Ensemble Update
-    all_preds_last = _get_all_model_predictions(regime=regime_str)
-    ensemble.update_weights(all_preds_last, color)
-    
-    # 4. RL Update
-    if last_pred and rl_agent:
+    # 3. Ensemble & Model Performance Update (Fair Assessment)
+    # Ta đánh giá các Model dựa trên đúng những gì chúng đã đoán TRƯỚC KHI có kết quả này.
+    if last_pred and 'model_votes' in last_pred:
+        # Lấy lại các xác suất mà các model đã đưa ra ở ván trước
+        model_predictions_to_verify = {}
+        for m_name, v_info in last_pred['model_votes'].items():
+            if 'probs' in v_info:
+                model_predictions_to_verify[m_name] = v_info['probs']
+        
+        # Cập nhật trọng số dựa trên độ chính xác thực tế
+        ensemble.update_weights(model_predictions_to_verify, color)
+        
+        # 4. RL Update (Learning strategy)
         rl_vote = last_pred.get('model_votes', {}).get('rl_agent', {}).get('vote', 'skip')
         rl_action = f'bet_{rl_vote.lower()}' if rl_vote != 'skip' else 'skip'
         rl_agent.update(recent_colors_cache, rl_action, color, regime=regime_str)
+    else:
+        # Nếu là ván đầu tiên, ta vẫn cho các module "nhìn" để khởi tạo context
+        all_preds_now = _get_all_model_predictions(regime=regime_str)
+        ensemble.update_weights(all_preds_now, color)
 
     # 5. Online Learner & Drift
     drift_detected = False
