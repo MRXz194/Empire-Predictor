@@ -89,13 +89,7 @@ async function sendToServer(rollData) {
     });
     if (resp.ok) {
       const data = await resp.json();
-      if (data.status === 'ok') {
-        console.log(`${LOG_PREFIX} ✅ Server processed Roll #${payload.round_id}. Prediction:`, data.prediction?.color);
-      } else if (data.status === 'skipped') {
-        console.log(`${LOG_PREFIX} ⏩ Server skipped duplicate Roll #${payload.round_id}.`);
-      } else {
-        console.log(`${LOG_PREFIX} ⚠️ Server status:`, data.status, data.message);
-      }
+      console.log(`${LOG_PREFIX} ✅ Server received. Prediction:`, data.prediction?.color, data.prediction?.confidence);
     }
   } catch (e) {
     // Server offline — silently ignore, data is in storage as backup
