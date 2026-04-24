@@ -73,7 +73,7 @@ function handleWSMessage(data) {
     if (data.type === 'roll') {
         const rid = data.roll?.round_id || 0;
         if (rid <= lastHandledRoundId && rid !== 0) {
-            console.log('[WS] Skipping duplicate roll UI update:', rid);
+            console.log(`[WS] Skipping already handled round_id: ${rid} (Last: ${lastHandledRoundId})`);
             return;
         }
         lastHandledRoundId = rid;

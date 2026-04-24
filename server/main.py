@@ -289,15 +289,15 @@ def _process_roll_sync(roll: RollInput, color: str):
     # 1. Storage
     insert_roll(roll.round_id, roll.outcome, color, roll.timestamp)
     
-    # Kịch Kim 4.8: Only append if NOT already synced in history_full
-    # Most Socket 'roll' events ALREADY include the current result as the last item.
-    if roll.history_full and len(roll.history_full) > 0 and roll.history_full[-1] == color:
-        # Already included in sync, do nothing
-        pass
+    # Kịch Kim 4.8.1: Elite Cache Synchronization
+    # Nếu có history_full từ socket, dùng nó làm chuẩn tuyệt đối thay vì tự append mò mẫm.
+    if roll.history_full and len(roll.history_full) > 0:
+        recent_colors_cache = roll.history_full[-500:]
+        print(f"[Core] 🔄 Cache Sync via HistoryFull: Last={recent_colors_cache[-1]} (Total: {len(recent_colors_cache)})")
     else:
+        # Fallback: Chỉ append nếu không có history_full
         recent_colors_cache.append(color)
-        
-    if len(recent_colors_cache) > 500: recent_colors_cache = recent_colors_cache[-500:]
+        print(f"[Core] ➕ Cache Append (Fallback): {color}")
     
     # Warm-up check (Min 60 contiguous for LSTM/Mamba)
     if len(recent_colors_cache) >= 60:
